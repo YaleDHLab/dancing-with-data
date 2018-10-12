@@ -1,0 +1,162 @@
+<html>
+<head>
+  <style>
+  html, body { width: 100%; height: 100%; background: #000; }
+  body { margin: 0; overflow: hidden; }
+  canvas { width: 100%; height: 100%; }
+  </style>
+  <meta charset='UTF-8'>
+</head>
+<body>
+  <script src='https://cdnjs.cloudflare.com/ajax/libs/three.js/97/three.min.js'></script>
+  <script src='https://threejs.org/examples/js/controls/TrackballControls.js'></script>
+  <script src='https://rawgit.com/mrdoob/three.js/dev/examples/js/loaders/GLTFLoader.js'></script>
+
+  <script>
+
+  var container, controls;
+  var camera, scene, renderer, light;
+
+  var clock = new THREE.Clock();
+  var mixers = [];
+
+  init();
+  animate();
+
+  function init() {
+
+    container = document.createElement( 'div' );
+    document.body.appendChild( container );
+
+    camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 1, 2000 );
+    camera.position.set( 100, 200, 300 );
+
+    controls = new THREE.TrackballControls( camera );
+    controls.target.set( 0, 100, 0 );
+    controls.update();
+
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color( 0xa0a0a0 );
+    scene.fog = new THREE.Fog( 0xa0a0a0, 200, 1000 );
+
+    light = new THREE.HemisphereLight( 0xffffff, 0x444444 );
+    light.position.set( 0, 200, 0 );
+    scene.add( light );
+
+    light = new THREE.DirectionalLight( 0xffffff );
+    light.position.set( 0, 200, 100 );
+    light.castShadow = true;
+    light.shadow.camera.top = 180;
+    light.shadow.camera.bottom = -100;
+    light.shadow.camera.left = -120;
+    light.shadow.camera.right = 120;
+    scene.add( light );
+
+    // ground
+    var mesh = new THREE.Mesh( new THREE.PlaneBufferGeometry( 2000, 2000 ), new THREE.MeshPhongMaterial( { color: 0x999999, depthWrite: false } ) );
+    mesh.rotation.x = - Math.PI / 2;
+    mesh.receiveShadow = true;
+    scene.add( mesh );
+
+    var grid = new THREE.GridHelper( 2000, 20, 0x000000, 0x000000 );
+    grid.material.opacity = 0.2;
+    grid.material.transparent = true;
+    scene.add( grid );
+
+    // model
+    var loader = new THREE.GLTFLoader();
+    loader.load('glb/dance.glb', function(gltf) {
+      window.gltf = gltf;
+      var model = gltf.scene,
+          nodes = [],
+          boxSize = 0.05,
+          geometry = new THREE.BoxGeometry(boxSize, boxSize, boxSize),
+          material = new THREE.MeshStandardMaterial({
+            color: 0xff0000,
+            metalness: 0
+          });
+      model.traverse(function(o) { nodes.push(o) });
+      nodes.forEach(function(o) {
+        if (!o.name.includes('System') &&
+            !o.name.includes('Unlabeled')) {
+          o.add( new THREE.Mesh( geometry, material ) );
+        }
+      });
+
+      window.nodes = nodes;
+
+      // scale and rotate the model
+      var size = 20;
+      model.scale.set(size, size, size);
+      model.rotation.x = Math.PI / 2;
+      scene.add( model );
+
+      // configure animations
+      var animations = gltf.animations[0]; // THREE.AnimationClip
+
+      var mixer = new THREE.AnimationMixer(model);
+      mixer.clipAction(gltf.animations[0]).play();
+      mixers.push(mixer);
+
+      // add a download data button
+      addDownloadButton(gltf)
+    });
+
+    renderer = new THREE.WebGLRenderer( { antialias: true } );
+    renderer.setPixelRatio( window.devicePixelRatio );
+    renderer.setSize( window.innerWidth, window.innerHeight );
+    renderer.shadowMap.enabled = true;
+    container.appendChild( renderer.domElement );
+    window.addEventListener( 'resize', onWindowResize, false );
+  }
+
+  function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize( window.innerWidth, window.innerHeight );
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    if ( mixers.length > 0 ) {
+      for ( var i = 0; i < mixers.length; i ++ ) {
+        mixers[ i ].update( clock.getDelta() );
+      }
+    }
+    renderer.render( scene, camera );
+    controls.update();
+  }
+
+  function addDownloadButton(gltf) {
+    // vertices are in the animations attribute on the gltf object
+    // assume keyframetrack.times values proceed at a uniform rate
+    // nb: we're throwing away quaternion data here...
+    // https://threejs.org/docs/#api/en/animation/KeyframeTrack
+    var data = {};
+
+    gltf.animations[0].tracks.map(t => {
+      if (t.name.includes('Anna') && t.name.includes('position')) {
+        data[ t.name ] = t.values;
+      }
+    })
+
+    // encode the data for downloading
+    var encoded = 'text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(data));
+
+    // add a download link
+    var a = document.createElement('a');
+    a.href = 'data:' + encoded;
+    a.download = 'dance.json';
+    a.textContent = 'download data';
+    a.style.position = 'fixed';
+    a.style.top = '10px';
+    a.style.left = '10px';
+    a.style.zIndex = '10000';
+    a.style.fontSize = '20px';
+
+    document.body.appendChild(a);
+  }
+
+  </script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+*.pyc
+*.swp
+*.pem
+*.DS_Store
+*.tar.gz
+None0000000.png
+.ipynb_checkpoints
+models
