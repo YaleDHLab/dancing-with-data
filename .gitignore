@@ -3,6 +3,7 @@
 *.pem
 *.DS_Store
 *.tar.gz
+*.png
 None0000000.png
 .ipynb_checkpoints
 models
