@@ -20,15 +20,15 @@ for i in labels:
 X = np.array(arr).T
 
 # right now every three rows display the x, y, z vals for an observation
-# reshape so we have X[time_idx][observation_idx][dimension_idx]
+# reshape so we have X[observation_idx][time_idx][dimension_idx]
 old = X
 rows, cols = [int(i) for i in old.shape]
-X = np.zeros(( int(rows/3), cols, 3 ))
+X = np.zeros(( cols, int(rows/3), 3 ))
 for r_idx, row in enumerate(range(rows)):
   time = math.floor(r_idx / 3)
   coord = r_idx % 3
   for c_idx, col in enumerate(range(cols)):
-    X[time][c_idx][coord] = old[r_idx][c_idx]
+    X[c_idx][time][coord] = old[r_idx][c_idx]
 
 np.save('npy/dance.npy', X)
 
