@@ -30,6 +30,14 @@ for r_idx, row in enumerate(range(rows)):
   for c_idx, col in enumerate(range(cols)):
     X[c_idx][time][coord] = old[r_idx][c_idx]
 
+# center each of the 3 dimensional features
+X -= np.amin(X, axis=(0, 1))
+X /= np.amax(X, axis=(0, 1))
+
+# flip the sign on the dimension matplotlib considers the vertical
+# dimension so the figure stands properly
+X[:,:,2] *= -1
+
 np.save('npy/dance.npy', X)
 
 print('X shape', X.shape)
