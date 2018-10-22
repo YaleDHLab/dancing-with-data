@@ -34,9 +34,11 @@ for r_idx, row in enumerate(range(rows)):
 X -= np.amin(X, axis=(0, 1))
 X /= np.amax(X, axis=(0, 1))
 
-# flip the sign on the dimension matplotlib considers the vertical
-# dimension so the figure stands properly
+# flip the sign on the matplotlib y dimension and add one to each
+# matplotlib y dimension so those values are scaled 0:1 and
+# so the figure stands vertically
 X[:,:,2] *= -1
+X[:,:,2] += 1
 
 np.save('npy/dance.npy', X)
 
