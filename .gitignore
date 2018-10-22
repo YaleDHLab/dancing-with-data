@@ -7,4 +7,5 @@
 model.py
 .ipynb_checkpoints
 __pycache__
-models
+snapshots
+utils/gan
