@@ -27,7 +27,7 @@ class MDN(Layer):
       self.mdn_sigmas.trainable_weights + \
       self.mdn_pi.trainable_weights
     self.non_trainable_weights = self.mdn_mus.non_trainable_weights + \
-      self.mdn_sigmas.non_trainable_weights +
+      self.mdn_sigmas.non_trainable_weights + \
       self.mdn_pi.non_trainable_weights
     self.built = True
 
