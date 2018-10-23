@@ -3,6 +3,9 @@
 *.pem
 *.DS_Store
 *.tar.gz
-None0000000.png
+*.png
+model.py
 .ipynb_checkpoints
-models
+__pycache__
+snapshots
+utils/gan
