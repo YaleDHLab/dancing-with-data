@@ -1,6 +1,6 @@
 # Dancing with Robots
 
-This repository contains source code for generating and visualizign 3D dance sequences with neural networks.
+This repository contains source code for generating and visualizing 3D dance sequences with neural networks.
 
 # Requirements
 
