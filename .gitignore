@@ -5,6 +5,7 @@
 *.tar.gz
 *.png
 model.py
+gan.py
 .ipynb_checkpoints
 __pycache__
 snapshots
