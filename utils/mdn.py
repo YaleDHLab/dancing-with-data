@@ -14,21 +14,21 @@ class MDN(Layer):
     self.num_mixes = num_mixes
 
     with tf.name_scope('MDN'):
-      self.mdn_mus     = Dense(self.num_mixes * self.output_dim, name='mdn_mus')
-      self.mdn_sigmas  = Dense(self.num_mixes, activation=K.exp, name='mdn_sigmas')
-      self.mdn_pi      = Dense(self.num_mixes, activation=K.softmax, name='mdn_pi')
+      self.mdn_mus    = Dense(self.num_mixes * self.output_dim, name='mdn_mus')
+      self.mdn_sigmas = Dense(self.num_mixes, activation=K.exp, name='mdn_sigmas')
+      self.mdn_alphas = Dense(self.num_mixes, activation=K.softmax, name='mdn_alphas')
     super(MDN, self).__init__(**kwargs)
 
   def build(self, input_shape):
     self.mdn_mus.build(input_shape)
     self.mdn_sigmas.build(input_shape)
-    self.mdn_pi.build(input_shape)
+    self.mdn_alphas.build(input_shape)
     self.trainable_weights = self.mdn_mus.trainable_weights + \
       self.mdn_sigmas.trainable_weights + \
-      self.mdn_pi.trainable_weights
+      self.mdn_alphas.trainable_weights
     self.non_trainable_weights = self.mdn_mus.non_trainable_weights + \
       self.mdn_sigmas.non_trainable_weights + \
-      self.mdn_pi.non_trainable_weights
+      self.mdn_alphas.non_trainable_weights
     self.built = True
 
   def call(self, x, mask=None):
@@ -36,7 +36,7 @@ class MDN(Layer):
       mdn_out = keras.layers.concatenate([
         self.mdn_mus(x),
         self.mdn_sigmas(x),
-        self.mdn_pi(x)
+        self.mdn_alphas(x)
       ], name='mdn_outputs')
     return mdn_out
 
@@ -55,7 +55,7 @@ class MDN(Layer):
   def get_loss_func(self):
     def unigaussian_loss(y_true, y_pred):
       mix = tf.range(start = 0, limit = self.num_mixes)
-      out_mu, out_sigma, out_pi = tf.split(y_pred, num_or_size_splits=[
+      out_mu, out_sigma, out_alphas = tf.split(y_pred, num_or_size_splits=[
         self.num_mixes * self.output_dim,
         self.num_mixes,
         self.num_mixes
@@ -64,11 +64,11 @@ class MDN(Layer):
       def loss_i(i):
         batch_size = tf.shape(out_sigma)[0]
         sigma_i = tf.slice(out_sigma, [0, i], [batch_size, 1], name='mdn_sigma_slice')
-        pi_i = tf.slice(out_pi, [0, i], [batch_size, 1], name='mdn_pi_slice')
+        alpha_i = tf.slice(out_alphas, [0, i], [batch_size, 1], name='mdn_alpha_slice')
         mu_i = tf.slice(out_mu, [0, i * self.output_dim], [batch_size, self.output_dim], name='mdn_mu_slice')
         dist = tf.distributions.Normal(loc=mu_i, scale=sigma_i)
         loss = dist.prob(y_true) # find the pdf around each value in y_true
-        loss = pi_i * loss
+        loss = alpha_i * loss
         return loss
 
       result = tf.map_fn(lambda  m: loss_i(m), mix, dtype=tf.float32, name='mix_map_fn')
