@@ -10,6 +10,12 @@ The python dependencies for this codebase can be installed with:
 pip install -r requirements.txt
 ```
 
+If you are working with a CUDA-enabled GPU, you will need to install the GPU version of tensorflow:
+
+```bash
+pip install tensorflow-gpu==1.11.0
+```
+
 # Data Preparation
 
 This codebase intends to parse 3D data in a particular format. Specifically, the input data should be a numpy array with the following shape:
