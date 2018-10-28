@@ -10,3 +10,6 @@ gan.py
 __pycache__
 snapshots
 utils/gan
+data/npy
+data/json
+data/glb
