@@ -189,7 +189,7 @@ if __name__ == "__main__":
         config.gpu_options.allow_growth = True
         session = tf.Session(config=config)
 
-    dirname = 'gan_rot%d_b%d_lrg%g_lrd%g_rw%g'%(args.rotate, args.batch_size, args.lr_gen, args.lr_disc, args.rigidity)
+    dirname = 'gan_rot%d_b%d_np%d_lrg%g_lrd%g_rw%g'%(args.rotate, args.batch_size, args.n_pred, args.lr_gen, args.lr_disc, args.rigidity)
     output_path = os.path.join(args.path, dirname)
 
     try:
