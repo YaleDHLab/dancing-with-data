@@ -1,0 +1,211 @@
+<html>
+<head>
+  <style>
+  html, body {
+    width: 100%;
+    height: 100%;
+    background: #fff;
+  }
+  body {
+    margin: 0;
+    overflow: hidden;
+  }
+  canvas {
+    width: 100%;
+    height: 100%;
+  }
+  </style>
+  <meta charset='UTF-8'>
+</head>
+<body>
+  <script src='https://cdnjs.cloudflare.com/ajax/libs/three.js/97/three.min.js'></script>
+  <script src='https://threejs.org/examples/js/controls/MapControls.js'></script>
+
+  <script>
+
+  var data,
+      mesh,
+      dancer = new THREE.Group(),
+      // data size vars
+      nFrames,
+      nParts,
+      nDims = 3,
+      // dimension scaling coefficients
+      //xScale = 300,
+      //yScale = 300,
+      //zScale = 70,
+      xScale = 300,
+      yScale = 300,
+      zScale = 300,
+      zOffs = 0.5,
+      // temporal variables
+      frame = 0, // time in gl world
+      time = 0, // time in data world
+      timeDelta = +1,
+      delay = 3; // number of frames needed to increment time
+
+  function get(url, onSuccess, onErr) {
+    var xmlhttp = new XMLHttpRequest();
+    xmlhttp.onreadystatechange = function() {
+      if (xmlhttp.readyState == XMLHttpRequest.DONE) {
+        if (xmlhttp.status === 200) {
+          if (onSuccess) onSuccess(JSON.parse(xmlhttp.responseText))
+        } else {
+          if (onErr) onErr(xmlhttp)
+        }
+      };
+    };
+    xmlhttp.open('GET', url, true);
+    xmlhttp.send();
+  };
+
+  function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  // generate a scene object
+  var scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xffffff);
+  scene.fog = new THREE.Fog(0xa0a0a0, 600, 1000);
+
+  // generate a camera
+  var aspectRatio = window.innerWidth / window.innerHeight;
+  var camera = new THREE.PerspectiveCamera(75, aspectRatio, 0.001, 10000);
+  camera.position.set(190, 180, 300);
+
+  // generate a renderer
+  var renderer = new THREE.WebGLRenderer({antialias: true});
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  // generate controls
+  var controls = new THREE.MapControls(camera, renderer.domElement);
+
+  // generate some lights
+  scene.add(new THREE.AmbientLight(0xffffff));
+  var light = new THREE.PointLight(0xffffff, 1, 0);
+  light.position.set(1, 1, 1);
+  scene.add(light);
+
+  // ground
+  var geometry = new THREE.PlaneBufferGeometry(2000, 2000),
+      material = new THREE.MeshPhongMaterial({
+        color: 0x999999, depthWrite: false }),
+      mesh = new THREE.Mesh(geometry, material);
+  mesh.rotation.x = Math.PI / 2;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+
+  // grid
+  var grid = new THREE.GridHelper(2000, 20, 0x000000, 0x000000);
+  grid.material.opacity = 0.2;
+  grid.material.transparent = true;
+  scene.add(grid);
+
+  // load the source json file
+  var urlParams = new URLSearchParams(window.location.search);
+
+  // dancer
+  get(urlParams.get('seq'), function(json) {
+    data = json.sequence;
+    edges = json.edges;
+
+    // data shape is from numpy: n_body_parts, n_time_steps, n_dimensions
+    nParts = data.length;
+    nFrames = data[0].length;
+    nDims = data[0][0].length;
+    nEdges = 140; //edges.length;
+
+    var material = new THREE.LineBasicMaterial({
+	    color: 0xaa0000,
+    });
+
+    for (var i=0; i<nEdges; ++i) {
+      var geometry = new THREE.BufferGeometry(),
+	  v1 = data[edges[i][0]][0],
+	  v2 = data[edges[i][1]][0];
+      var positions = new Float32Array( [
+        v1[0]*xScale, v1[1]*yScale, (v1[2]+zOffs)*zScale,
+	v2[0]*xScale, v2[1]*yScale, (v2[2]+zOffs)*zScale,
+      ]);
+      geometry.addAttribute('position', new THREE.Float32BufferAttribute( positions, 3 ) );
+      var line = new THREE.Line( geometry );
+      dancer.rotation.x = -Math.PI/2;
+      dancer.add(line);
+    }
+
+    /*
+    var geometry = new THREE.SphereBufferGeometry(0.04),
+        material = new THREE.MeshStandardMaterial({
+          color: 0xaa0000,
+          metalness: 0
+        });
+
+    for (var i=0; i<nParts; i++) {
+      var mesh = new THREE.Mesh(geometry, material),
+          x = data[i][0][0] * xScale,
+          y = data[i][0][1] * yScale,
+          z = (data[i][0][2]+zOffs) * zScale;
+      mesh.position.set(x, y, z);
+      mesh.scale.set(30, 30, 30);
+      dancer.rotation.x = -Math.PI/2;
+      dancer.add(mesh);
+    }
+    */
+
+    scene.add(dancer);
+    render();
+  })
+
+  // render loop
+  function render() {
+
+    // make the time go back and forth across the time axis
+    frame++;
+    if (frame % delay == 0) {
+      time = (time + timeDelta);
+      if (time == 0) timeDelta = +1;
+      if (time + 1 == nFrames) timeDelta = -1;
+      // update each edge
+      dancer.children.forEach(function(child, idx) {
+        p = child.geometry.attributes.position.array;
+	var v1 = data[edges[idx][0]][time];
+	var v2 = data[edges[idx][1]][time];
+	p[0] = v1[0]*xScale;
+	p[1] = v1[1]*yScale;
+	p[2] = (v1[2]+zOffs)*zScale;
+	p[3] = v2[0]*xScale;
+	p[4] = v2[1]*yScale;
+	p[5] = (v2[2]+zOffs)*zScale;
+	child.geometry.attributes.position.needsUpdate = true;
+      });
+    }
+    /*
+    if (frame % delay == 0) {
+      time = (time + timeDelta);
+      if (time == 0) timeDelta = +1;
+      if (time + 1 == nFrames) timeDelta = -1;
+      // update each body part / vertex
+      dancer.children.forEach(function(child, idx) {
+        var x = data[idx][time][0] * xScale,
+            y = data[idx][time][1] * yScale,
+            z = data[idx][time][2] * zScale;
+        child.position.set(x, y, z);
+      })
+    }
+    */
+
+    // render
+    requestAnimationFrame(render);
+    renderer.render(scene, camera);
+    controls.update();
+  };
+
+  window.addEventListener('resize', onWindowResize, false);
+
+  </script>
+</body>
+</html>

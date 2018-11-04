@@ -6,6 +6,8 @@ import sys
 import numpy as np
 import pickle
 import itertools as it
+import time
+import signal
 
 import keras.backend as K
 from keras import layers
@@ -16,7 +18,56 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 import mpl_toolkits.mplot3d.axes3d as p3
 
-from utils.plot import plot_pose, plot_stick
+#from utils.plot import plot_pose, plot_stick
+import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
+import mpl_toolkits.mplot3d.axes3d as p3
+from mpl_toolkits.mplot3d.art3d import juggle_axes
+
+def plot_pose(x, ax=None, fig=None, subplot=None,
+              lim=(-0.75,0.75), center=False):
+    if fig is None:
+        if ax:
+            fig = ax.get_figure()
+        else:
+            fig = plt.figure()
+    if not ax:
+        if subplot:
+            ax = fig.add_subplot(*subplot, projection='3d')
+        else:
+            ax = p3.Axes3D(fig)
+    if center:
+        lim = x.min(), x.max()
+    ax.set_xlim(*lim)
+    ax.set_ylim(*lim)
+    ax.set_zlim(*lim)
+    ax.scatter(x[:,0], x[:,1], x[:,2], marker='.')
+    return ax
+
+def plot_stick(x, edges, fig=None, ax=None, subplot=None,
+               lim=(-0.75,0.75), center=False):
+    if fig is None:
+        if ax:
+            fig = ax.get_figure()
+        else:
+            fig = plt.figure()
+    if ax is None:
+        if subplot:
+            ax = fig.add_subplot(*subplot, projection='3d')
+        else:
+            ax = p3.Axes3D(fig)
+    if center:
+        lim = x.min(), x.max()
+    ax.set_xlim(*lim)
+    ax.set_ylim(*lim)
+    ax.set_zlim(*lim)
+    for e in edges:
+        ax.plot(np.linspace(x[e[0],0],x[e[1],0],10),
+                np.linspace(x[e[0],1],x[e[1],1],10),
+                np.linspace(x[e[0],2],x[e[1],2],10)
+               )
+    return ax
 
 def load_data(file_name):
     X0 = np.load(file_name)
@@ -72,8 +123,10 @@ def mk_model(X, n_prompt=60, n_pred=4, n_cells=(96,64,32), n_cells_disc=(48,48,4
 
     H = layers.Reshape((n_prompt, X.shape[1]*X.shape[2]))(H)
 
+    lstm = layers.CuDNNLSTM
+    #lstm = layers.LSTM
     for nc in n_cells:
-        H = layers.CuDNNLSTM(nc, return_sequences=True)(H)
+        H = lstm(nc, return_sequences=True)(H)
     H = layers.Cropping1D((n_prompt-n_pred,0))(H)
 
     Hn = layers.Dense(n_pred*n_cells[-1])(Hn)
@@ -106,14 +159,14 @@ def mk_model(X, n_prompt=60, n_pred=4, n_cells=(96,64,32), n_cells_disc=(48,48,4
     H2 = layers.Reshape((n_pred, X.shape[1]*X.shape[2]))(H2)
 
     for nc in n_cells_disc[:-1]:
-        L = layers.CuDNNLSTM(nc, return_sequences=True)
+        L = lstm(nc, return_sequences=True)
         H1 = L(H1)
         H2 = L(H2)
 
     H = layers.Concatenate(axis=1)([H1,H2])
-    H = layers.CuDNNLSTM(n_cells_disc[-1])(H)
+    H = lstm(n_cells_disc[-1])(H)
 
-    H2 = layers.CuDNNLSTM(n_cells_disc[-1])(H2)
+    H2 = lstm(n_cells_disc[-1])(H2)
 
     H = layers.Concatenate()([H,H2])
 
@@ -157,6 +210,13 @@ def mk_model(X, n_prompt=60, n_pred=4, n_cells=(96,64,32), n_cells_disc=(48,48,4
 
     return generator, discriminator, gan
 
+class Log:
+    def __init__(self, fpath):
+        self._file = open(fpath, 'w')
+    def write(self, msg):
+        self._file.write(msg)
+        self._file.flush()
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--rotate", action='store_true', help="Apply rotations during training")
@@ -172,6 +232,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=500, help="Number of epochs to train")
     parser.add_argument("--force", action='store_true', help="Force overwrite directories")
     parser.add_argument("--data", default="carrie-10-mins.npy", help="Data to train on")
+    parser.add_argument("--do-plots", action='store_true', help="Save plots to log dir")
     parser.add_argument("path", help="Output path")
     args = parser.parse_args()
 
@@ -192,6 +253,7 @@ if __name__ == "__main__":
     dirname = 'gan_rot%d_b%d_np%d_lrg%g_lrd%g_rw%g'%(args.rotate, args.batch_size, args.n_pred, args.lr_gen, args.lr_disc, args.rigidity)
     output_path = os.path.join(args.path, dirname)
 
+
     try:
         os.makedirs(output_path)
     except OSError as e:
@@ -199,24 +261,63 @@ if __name__ == "__main__":
         if e.errno == errno.EEXIST:
             if args.force:
                 print("Warning -- writing results to existing path:", output_path)
+                sys.stdout.flush()
             else:
-                print("Exiting because of existing path:", output_path)
+                print("Skipping run because of existing path:", output_path)
                 sys.exit()
         else:
             raise
 
+    status_file = Log(os.path.join(output_path, 'status'))
+    status_file.write("init\n")
+
+    abort_now = False
+    abort_run = False
+    abort_reason = None
+    training = False
+    def signal_handler(sig, frame):
+        print("***Signaled!", sig)
+        status_file.write("signal (%s)\n"%sig)
+        abort_now = True
+        abort_run = True
+        abort_reason = "signal"
+        if not training:
+            sys.exit()
+
+    except_hook_default = sys.excepthook
+    def except_hook(exctype, value, tb):
+        status_file.write("exception (%s)\n"%exctype)
+        except_hook_default(exctype, value, tb)
+    sys.excepthook = except_hook
+
+    #signal.signal(signal.SIGINT, signal_handler)
+    #signal.signal(signal.SIGTERM, signal_handler)
+    for i in [x for x in dir(signal) if x.startswith("SIG")]:
+        try:
+            signum = getattr(signal,i)
+            signal.signal(signum, signal_handler)
+        except:
+            pass
+
     with open(os.path.join(output_path, 'config.pkl'), 'wb') as f:
         pickle.dump(vars(args), f)
 
-    with open(os.path.join(output_path, 'pid.%d'%os.getpid()), 'w') as f:
-        pass
+    if 'SLURM_JOB_ID' in os.environ:
+        with open(os.path.join(output_path, 'jid.%s'%os.environ['SLURM_JOB_ID']), 'w') as f:
+            pass
+        with open(os.path.join(output_path, 'slurm_job'), 'w') as f:
+            f.write(os.environ['SLURM_JOB_ID']+"\n")
+    else:
+        with open(os.path.join(output_path, 'pid.%d'%os.getpid()), 'w') as f:
+            pass
 
     print("Loading data")
+    sys.stdout.flush()
     X, vtx_pairs = load_data(args.data)
 
     n_vtx = X.shape[1]
-    q5_mean, q95_mean = np.quantile(np.array(vtx_pairs)[:,2], [0.5,0.95])
-    q5_var, q95_var = np.quantile(np.array(vtx_pairs)[:,3], [0.5,0.95])
+    q5_mean, q95_mean = np.percentile(np.array(vtx_pairs)[:,2], [5,95])
+    q5_var, q95_var = np.percentile(np.array(vtx_pairs)[:,3], [5,95])
 
     epochs = args.epochs
     batch_size = args.batch_size
@@ -234,16 +335,24 @@ if __name__ == "__main__":
 
     K.set_value(gan.optimizer.lr, args.lr_gen)
     K.set_value(disc.optimizer.lr, args.lr_disc)
+    K.set_value(gan.hp_rigidity_weight, args.rigidity)
 
     d_losses = []
     g_losses = []
 
     nbatches = (len(X)-batch_size*n_prompt-n_pred)//batch_size
 
+    subplots = {}
     y_real = np.ones(batch_size)
     y_fake = np.zeros(batch_size)
     print("Begin training %d epochs, with %d batches per epoch."%(epochs, nbatches))
+    training = True
+    sys.stdout.flush()
+    tstart = time.time()
+    status_file.write('training\n')
+    loss_file = Log(os.path.join(output_path, 'losses.log'))
     for iepoch in range(epochs):
+        estart = time.time()
         offsets = np.random.choice(len(X)-batch_size*n_prompt-n_pred, replace=False, size=(nbatches,batch_size))
         
         d_loss = 0
@@ -278,83 +387,111 @@ if __name__ == "__main__":
             
             disc.trainable = False
             g_loss += gan.train_on_batch([x1_real, noise], None)
+            if abort_now:
+                break
             
-        d_losses.append(d_loss/nbatches)
-        g_losses.append(g_loss/nbatches)
-        print("Epoch %d/%d: L(d)=%.2e L(g)=%.2e" % (iepoch, epochs, d_losses[-1], g_losses[-1]))
+        d_losses.append(d_loss/(ibatch+1))
+        g_losses.append(g_loss/(ibatch+1))
+        loss_file.write('%g\t%g\n'%(d_losses[-1], g_losses[-1]))
+        print("Epoch %d/%d (%03.2fs): L(d)=%.2e L(g)=%.2e" % (iepoch, epochs, time.time()-estart, d_losses[-1], g_losses[-1]))
         sys.stdout.flush()
 
-        if iepoch%10==0:
-            fig = plt.figure(0, figsize=(9,4))
-            plt.clf()
-            plt.subplot(1,2,1)
-            plt.plot(d_losses, label='disc')
-            plt.plot(g_losses, label='gen')
-            plt.legend()
-            plt.xlabel('epoch', fontsize=14)
-            plt.ylabel('loss', fontsize=14)
-            plt.yscale('log')
-            plt.subplot(1,2,2)
-            plt.plot(d_losses[:-128], label='disc')
-            plt.plot(g_losses[:-128], label='gen')
-            plt.legend()
-            plt.xlabel('epoch', fontsize=14)
-            plt.ylabel('loss', fontsize=14)
-            fname = os.path.join(output_path, 'losses.png')
-            plt.savefig(fname)
-            print("Saved losses to", fname)
+        if iepoch>10 and np.mean(d_losses[-10:])<1e-5:
+            abort_run = True
+            abort_reason = "ldisc"
 
-            fig = plt.figure(1, figsize=(9,9))
-            plt.clf()
-            examples = gen.predict([x1_real[:4], np.random.normal(size=(4,args.noise_dim))])
-            for iplt in range(4):
-                ax = plot_stick(examples[iplt,0], vtx_pairs[:n_edges], fig=fig, subplot=(2,2,iplt+1))
-                plot_pose(examples[iplt,0], ax=ax, center=True)
-            plt.suptitle("Epoch %d"%iepoch)
-            fname = os.path.join(output_path, 'poses_e%04dpng'%iepoch)
-            plt.savefig(fname)
-            print("Saved poses to", fname)
+        if iepoch%10==0 or abort_run:
+            if args.do_plots:
+                fig = plt.figure(0, figsize=(9,4))
+                plt.clf()
+                plt.subplot(1,2,1)
+                xepochs = np.arange(1, len(d_losses)+1)
+                plt.plot(xepochs,d_losses, label='disc')
+                plt.plot(xepochs,g_losses, label='gen')
+                plt.legend()
+                plt.xlabel('epoch', fontsize=14)
+                plt.ylabel('loss', fontsize=14)
+                plt.yscale('log')
+                plt.subplot(1,2,2)
+                plt.plot(xepochs[-64:],d_losses[-64:], label='disc')
+                plt.plot(xepochs[-64:],g_losses[-64:], label='gen')
+                plt.legend()
+                plt.xlabel('epoch', fontsize=14)
+                plt.ylabel('loss', fontsize=14)
+                fname = os.path.join(output_path, 'losses.png')
+                plt.savefig(fname)
+                #np.save(os.path.join(output_path, 'losses-g.npy'), g_losses)
+                #np.save(os.path.join(output_path, 'losses-d.npy'), d_losses)
 
-            iprompt = np.random.randint(len(X)-batch_size*n_prompt-1)
-            ngen = 3*n_prompt
+            noise = np.random.normal(size=(4,args.noise_dim))
+            samples = gen.predict([x1_real[:4], noise])
 
-            gen_seq = np.zeros((n_prompt+ngen, X.shape[1], X.shape[2]))
-            gen_seq[:n_prompt] = X[iprompt:iprompt+n_prompt]
+            if args.do_plots:
+                fig = plt.figure(1, figsize=(9,9))
+                plt.clf()
+                for iplt in range(4):
+                    ax = plot_stick(samples[iplt,0], vtx_pairs[:n_edges], fig=fig, subplot=(2,2,iplt+1))
+                    plot_pose(samples[iplt,0], ax=ax, center=True)
+                plt.suptitle("Epoch %d"%iepoch)
+                fname = os.path.join(output_path, 'poses_e%04d.png'%iepoch)
+                plt.savefig(fname)
+            np.savez(os.path.join(output_path, 'samples_e%04d.npz'%iepoch), prompt=x1_real[:4], noise=noise, pred=samples, edges=vtx_pairs[:n_edges])
+
             dm = np.zeros((n_vtx,n_vtx))
             dv = np.zeros_like(dm)
             for i,j in it.combinations(range(n_vtx), r=2):
-                dm[i,j] = dm[j,i] = np.sqrt((gen_seq[n_prompt:,i]-gen_seq[n_prompt:,j])**2).sum(axis=-1).mean()
-                dv[i,j] = dv[j,i] = np.sqrt((gen_seq[n_prompt:,i]-gen_seq[n_prompt:,j])**2).sum(axis=-1).var(ddof=1)
+                dist = np.sqrt(np.sum((samples[:,:,i]-samples[:,:,j])**2, axis=-1))
+                dm[i,j] = dm[j,i] = dist.mean()
+                dv[i,j] = dv[j,i] = dist.var(ddof=1)
+            np.savez(os.path.join(output_path, 'rigidity_e%04d.npz'%iepoch), mean=dm, var=dv)
 
-            fig = plt.figure(2, figsize=(9,4))
-            plt.subplot(1,2,1)
-            plt.imshow(dm, vmin=q5_mean, vmax=q95_mean)
-            plt.title('mean')
-            plt.subplot(1,2,2)
-            plt.imshow(dv, vmin=q5_var, vmax=q95_var)
-            plt.title('var')
-            plt.suptitle('Epoch %d'%iepoch)
-            fname = os.path.join(output_path, 'rigidity_e%04dpng'%iepoch)
-            plt.savefig(fname)
-            print("Saved rigidity scores to", fname)
-            sys.stdout.flush()
+            if args.do_plots:
+                fig = plt.figure(2, figsize=(9,4))
+                plt.subplot(1,2,1)
+                plt.imshow(dm, vmin=q5_mean, vmax=q95_mean)
+                plt.title('mean')
+                plt.subplot(1,2,2)
+                plt.imshow(dv, vmin=q5_var, vmax=q95_var)
+                plt.title('var')
+                plt.suptitle('Epoch %d'%iepoch)
+                fname = os.path.join(output_path, 'rigidity_e%04d.png'%iepoch)
+                plt.savefig(fname)
+                print("Saved plots to", output_path)
+                sys.stdout.flush()
+
+            print("Saved samples to", output_path)
 
 
-        if iepoch%10==0 or iepoch==(args.epochs-1):
+        if iepoch%10==0 or iepoch==(args.epochs-1) or abort_run:
             for m,mname in ( (gen,'gen'),(disc,'disc'),(gan,'gan'),):
                 model_file = os.path.join(output_path, 'model-%s-latest.h5'%mname)
                 weights_file = os.path.join(output_path, 'weights-%s-latest.h5'%mname)
                 m.save(model_file)
                 m.save_weights(weights_file)
-                print("Saved model to", model_file)
-                print("Saved weights to", weights_file)
+            print("Checkpoint model at",output_path)
             sys.stdout.flush()
-        if iepoch%100==0:
+        if iepoch%100==0 or abort_run:
             for m,mname in ( (gen,'gen'),(disc,'disc'),(gan,'gan'),):
                 model_file = os.path.join(output_path, 'model-%s-e%04d.h5'%(mname,iepoch))
                 weights_file = os.path.join(output_path, 'weights-%s-e%04d.h5'%(mname,iepoch))
                 m.save(model_file)
                 m.save_weights(weights_file)
-                print("Saved model to", model_file)
-                print("Saved weights to", weights_file)
+            print("Saved model for e%04d at %s"%(iepoch,output_path))
             sys.stdout.flush()
+
+        if abort_run:
+            status_file.write('abort (%s)\n'%abort_reason)
+            if abort_reason=='ldisc':
+                print("***Exiting early due to low discriminator losses.")
+            elif abort_reason=='signal':
+                print("***Exiting early due to signal.")
+            else:
+                print("***Exiting early due to unknown reason.")
+            break
+
+    if iepoch==(epochs-1):
+        # we actually made it to the end!
+        status_file.write('complete\n')
+
+    print("Training complete after %d epochs. Total time: %ds"%(iepoch, time.time()-tstart))
+    status_file.write('finished\n')
