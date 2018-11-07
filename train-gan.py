@@ -3,6 +3,7 @@
 import argparse
 import os
 import sys
+import subprocess
 import numpy as np
 import pickle
 import itertools as it
@@ -227,6 +228,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=128, help="Batch size")
     parser.add_argument("--n-prompt", type=int, default=24, help="Number of frames in the prompt sequence")
     parser.add_argument("--n-pred", type=int, default=4, help="Number of future frames to predict")
+    parser.add_argument("--ncx", type=int, default=1, help="Multiplier for the number of lstm cells")
     parser.add_argument("--noise-dim", type=int, default=128, help="Noise dimensionality")
     parser.add_argument("--gpu", type=str, help="GPU selector (on gatsby)")
     parser.add_argument("--epochs", type=int, default=500, help="Number of epochs to train")
@@ -237,12 +239,15 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # config for Gatsby cores
-    if 'gatsby' in os.environ['HOSTNAME']:
+    hostname = str(subprocess.check_output('hostname'))
+    print("Checking hostname: %s" % hostname)
+    if 'gatsby' in hostname:
         if not 'CUDA_VISIBLE_DEVICES' in os.environ:
             # specify target gpu device
             os.environ['CUDA_VISIBLE_DEVICES'] = '0' # either '0' or '1' to utilize Titan X GPUs
 
         if args.gpu is not None:
+            print("Setting CUDA_VISIBLE_DEVICES = '%s'"%args.gpu)
             os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
         # allow dynamic GPU allocation
@@ -250,7 +255,7 @@ if __name__ == "__main__":
         config.gpu_options.allow_growth = True
         session = tf.Session(config=config)
 
-    dirname = 'gan_rot%d_b%d_np%d_lrg%g_lrd%g_rw%g'%(args.rotate, args.batch_size, args.n_pred, args.lr_gen, args.lr_disc, args.rigidity)
+    dirname = 'gan_rot%d_b%d_ni%d_np%d_lrg%g_lrd%g_rw%g_ncx%d'%(args.rotate, args.batch_size, args.n_prompt, args.n_pred, args.lr_gen, args.lr_disc, args.rigidity, args.ncx)
     output_path = os.path.join(args.path, dirname)
 
 
@@ -276,11 +281,15 @@ if __name__ == "__main__":
     abort_reason = None
     training = False
     def signal_handler(sig, frame):
-        print("***Signaled!", sig)
-        status_file.write("signal (%s)\n"%sig)
+        global abort_now
+        global abort_run
+        global abort_reason
         abort_now = True
         abort_run = True
         abort_reason = "signal"
+        status_file.write("signal (%s)\n"%sig)
+        print("***Signaled!", sig)
+        sys.stdout.flush()
         if not training:
             sys.exit()
 
@@ -326,12 +335,16 @@ if __name__ == "__main__":
     n_pred = args.n_pred
     noise_dim = args.noise_dim
     n_edges = args.n_edges
+    n_cells = (96*args.ncx, 64*args.ncx, 32*args.ncx)
+    n_cells_disc=(48*args.ncx, 48*args.ncx, 48*args.ncx)
 
     gen, disc, gan = mk_model(X,
             n_prompt=n_prompt,
             n_pred=n_pred,
             noise_dim=noise_dim,
-            rigid_edges=vtx_pairs[:n_edges])
+            rigid_edges=vtx_pairs[:n_edges],
+            n_cells=n_cells,
+            n_cells_disc=n_cells_disc)
 
     K.set_value(gan.optimizer.lr, args.lr_gen)
     K.set_value(disc.optimizer.lr, args.lr_disc)
@@ -388,6 +401,8 @@ if __name__ == "__main__":
             disc.trainable = False
             g_loss += gan.train_on_batch([x1_real, noise], None)
             if abort_now:
+                print("Aborting mid-epoch (reason: %s)" % abort_reason)
+                sys.stdout.flush()
                 break
             
         d_losses.append(d_loss/(ibatch+1))
@@ -396,9 +411,10 @@ if __name__ == "__main__":
         print("Epoch %d/%d (%03.2fs): L(d)=%.2e L(g)=%.2e" % (iepoch, epochs, time.time()-estart, d_losses[-1], g_losses[-1]))
         sys.stdout.flush()
 
-        if iepoch>10 and np.mean(d_losses[-10:])<1e-5:
+        LDISC_LIMIT = 1e-5
+        if iepoch>10 and np.mean(d_losses[-10:])<LDISC_LIMIT:
             abort_run = True
-            abort_reason = "ldisc"
+            abort_reason = "ldisc<%g"%LDISC_LIMIT
 
         if iepoch%10==0 or abort_run:
             if args.do_plots:

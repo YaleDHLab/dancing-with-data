@@ -1,22 +1,23 @@
 #!/bin/bash
 
+path=$1
+
+if [ -z "${path}" ]; then
+	echo "Please specify the path to sync."
+	exit 1;
+fi
+
 source aws.sh
 
-#./gen_report.py gan_search_mariel1_1102
-#aws s3 cp gan_search_mariel1_1102/summary.html s3://dance-gan/gan_search_mariel1_1102/summary.html
-#aws s3api put-object-acl --acl public-read --bucket dance-gan --key gan_search_mariel1_1102/summary.html
+for f in $path/*/model-gen-latest.h5; do
+	d=$(dirname $f)
+	./render_video.py --out ${path}/video_0_$(basename $d).json $d
+	./render_video.py --allpred --out ${path}/video_1_$(basename $d).json $d
+	./render_video.py --allpred --fix-noise --out ${path}/video_2_$(basename $d).json $d
+done
 
-path=gan_search_mariel1_1102
+./gen_report.py ${path}
 
-#aws s3 cp render.html s3://dance-gan/${path}/render.html
-#aws s3api put-object-acl --acl public-read --bucket dance-gan --key ${path}/render.html
+aws s3 sync --exclude "*" --include "*.json" --include "*.html" --acl public-read ${path} s3://dance-gan/${path}/
 
-#aws s3 cp ${path}/test_video.json s3://dance-gan/${path}/test_video.json
-#aws s3api put-object-acl --acl public-read --bucket dance-gan --key ${path}/test_video.json
-
-#for f in ${path}/*.json; do
-#	aws s3 cp $f s3://dance-gan/${f}
-#	aws s3api put-object-acl --acl public-read --bucket dance-gan --key $f
-#done
-
-aws s3 sync --exclude "*" --include "*.json" --include "*.html" --acl public-read gan_search_mariel1_1102 s3://dance-gan/gan_search_mariel1_1102/
+echo "s3 update complete"
