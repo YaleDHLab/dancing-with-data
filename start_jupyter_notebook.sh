@@ -5,7 +5,7 @@
 #SBATCH --mem-per-cpu 8G
 #SBATCH --time 6:00:00
 #SBATCH --job-name jupyter-notebook
-#SBATCH --output jupyter-notebook-%J.log
+#SBATCH --output logs/jupyter-notebook-%J.log
 #SBATCH -c 2
 
 # get tunneling info
@@ -41,5 +41,6 @@ localhost:${port}  (prefix w/ https:// if using password)
 
 # DON'T USE ADDRESS BELOW. 
 # DO USE TOKEN BELOW
-# source activate jupyter
+
+source activate env
 jupyter-notebook --no-browser --port=${port} --ip=${node}

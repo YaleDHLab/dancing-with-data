@@ -5,7 +5,7 @@
 #SBATCH --mem-per-cpu 8G
 #SBATCH --time 6:00:00
 #SBATCH --job-name jupyter-lab
-#SBATCH --output jupyter-lab-%J.log
+#SBATCH --output logs/jupyter-lab-%J.log
 #SBATCH -c 2
 
 # get tunneling info
@@ -34,12 +34,5 @@ SSH port: 22
 Use a Browser on your local machine to go to:
 localhost:${port}  (prefix w/ https:// if using password)
 "
-
-# load modules or conda environments here
-# e.g. farnam:
-# module load Python/2.7.13-foss-2016b 
-
-# DON'T USE ADDRESS BELOW. 
-# DO USE TOKEN BELOW
-# source activate jupyter
+source activate env
 jupyter lab --no-browser --port=${port} --ip=${node}
