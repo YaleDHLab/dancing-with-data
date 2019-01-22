@@ -16,6 +16,23 @@ If you are working with a CUDA-enabled GPU, you will need to install the GPU ver
 pip install tensorflow-gpu==1.11.0
 ```
 
+If you are working on the Grace HPC clusters at Yale, you can install dependencies instead using: 
+```bash
+pip3 install -r requirements_grace.txt
+```
+
+# Working on Grace
+Choose one of the following to start your session:
+```bash
+sbatch start_jupyter_notebook.sh 
+sbatch start_jupyter_lab.sh
+```
+
+1. Look at the .log file created and copy Line #3 into a new terminal on your local laptop (enter your password and don’t expect to see any more output).
+2. Then open a new Chrome tab and go to the beginning of Line #17 (e.g. `localhost:9809`).
+3. Copy the token from the .log file when prompted.
+4. Open `full_workflow.ipynb` and get started!
+
 # Data Preparation
 
 This codebase intends to parse 3D data in a particular format. Specifically, the input data should be a numpy array with the following shape:
