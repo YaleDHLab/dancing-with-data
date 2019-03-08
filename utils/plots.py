@@ -78,46 +78,9 @@ def load_data(pattern="data/mariel_*.npy"):
 
     return ds_all, ds_all_centered, datasets, datasets_centered, ds_counts
 
-def find_edge_pairs(X):
-    n_vtx = X.shape[1]
-    vdist_var = np.zeros((n_vtx,n_vtx))
-    for i in range(X.shape[1]):
-        for j in range(i+1,X.shape[1]):
-            vdist = np.sum((X[:,i]-X[:,j])**2, axis=-1)
-            vdist_var[i,j] = vdist_var[j,i] = vdist.var(ddof=1)
-    
-    upper_triangle = np.triu_indices_from(vdist_var, k=1)
-    vtx_pairs = sorted(zip(*upper_triangle), key=lambda p: vdist_var[p[0],p[1]])
-    return vtx_pairs
 
-def animate(seq, ghost=None, ghost_shift=0, ax_lims=(-0.4,0.4), zcolor=None, plot_args={}, speed=45):
-    fig = plt.figure()
-    ax = p3.Axes3D(fig)
-    if ax_lims:
-        ax.set_xlim(*ax_lims)
-        ax.set_ylim(*ax_lims)
-        ax.set_zlim(*ax_lims)
-    if zcolor is not None:
-        plot_args['c'] = zcolor
-        plot_args['cmap'] = 'cool'
-        
-    points = ax.scatter(seq[0,:,0]-ghost_shift/2, seq[0,:,1], seq[0,:,2], depthshade=False, **plot_args)
-    if ghost is not None:
-        gpoints = ax.scatter(ghost[0,:,0]+ghost_shift/2, ghost[0,:,1], ghost[0,:,2], depthshade=False, color='red', alpha=0.3)
-    
-    def update(t):
-        points._offsets3d = juggle_axes(seq[t,:,0]-ghost_shift/2, seq[t,:,1], seq[t,:,2], 'z')
-        if ghost is not None:
-            gpoints._offsets3d = juggle_axes(ghost[t,:,0]+ghost_shift/2, ghost[t,:,1], ghost[t,:,2], 'z')
-        
-    return animation.FuncAnimation(
-        fig,
-        update,
-        len(seq),
-        interval=speed,
-        blit=False,
-    ).to_html5_video()
-
+# these are the ordered label names of the 53 vertices
+# (after the Labeling/SolvingHips points have been excised)
 point_labels = ['ARIEL', 'C7',
           'CLAV', 'LANK',
           'LBHD', 'LBSH',
@@ -149,29 +112,31 @@ point_labels = ['ARIEL', 'C7',
           #'SolvingHips',
           'T10']
 
+# This array defines the points between which skeletal lines should
+# be drawn. Each segment is defined as a line between a group of one
+# or more named points -- the line will be drawn at the average position
+# of the points in the group
 skeleton_lines = [
-    (('LKNE','LKNI'), ('LHEL',)),
-    (('RKNE','RKNI'), ('RHEL',)),
-    (('LHEL',), ('LTOE',)),
+    # ( (start group), (end group) ),
+    (('LHEL',), ('LTOE',)), # toe to heel
     (('RHEL',), ('RTOE',)),
-    #(('LKNE','LKNI',), ('SolvingHips',)),
-    #(('RKNE','RKNI',), ('SolvingHips',)),
-    #(('SolvingHips',), ('STRN','T10',)),
-    (('LKNE','LKNI'), ('LFWT','RFWT','LBWT','RBWT')),
+    (('LKNE','LKNI'), ('LHEL',)), # heel to knee
+    (('RKNE','RKNI'), ('RHEL',)),
+    (('LKNE','LKNI'), ('LFWT','RFWT','LBWT','RBWT')), # knee to "navel"
     (('RKNE','RKNI'), ('LFWT','RFWT','LBWT','RBWT')),
-    (('LFWT','RFWT','LBWT','RBWT'), ('STRN','T10',)),
-    (('STRN','T10',), ('CLAV','C7',)),
-    (('CLAV','C7',), ('LFSH','LBSH',),),
+    (('LFWT','RFWT','LBWT','RBWT'), ('STRN','T10',)), # "navel" to chest
+    (('STRN','T10',), ('CLAV','C7',)), # chest to neck
+    (('CLAV','C7',), ('LFSH','LBSH',),), # neck to shoulders
     (('CLAV','C7',), ('RFSH','RBSH',),),
-    (('LFSH','LBSH',), ('LELB', 'LIEL',),),
+    (('LFSH','LBSH',), ('LELB', 'LIEL',),), # shoulders to elbows
     (('RFSH','RBSH',), ('RELB', 'RIEL',),),
-    (('LELB', 'LIEL',), ('LOWR','LIWR',),),
+    (('LELB', 'LIEL',), ('LOWR','LIWR',),), # elbows to wrist
     (('RELB', 'RIEL',), ('ROWR','RIWR',),),
-    (('LFHD',), ('LBHD',)),
+    (('LFHD',), ('LBHD',)), # draw lines around circumference of the head
     (('LBHD',), ('RBHD',)),
     (('RBHD',), ('RFHD',)),
     (('RFHD',), ('LFHD',)),
-    (('LFHD',), ('ARIEL',)),
+    (('LFHD',), ('ARIEL',)), # connect circumference points to top of head
     (('LBHD',), ('ARIEL',)),
     (('RBHD',), ('ARIEL',)),
     (('RFHD',), ('ARIEL',)),
@@ -183,33 +148,6 @@ for g1,g2 in skeleton_lines:
     entry.append([point_labels.index(l) for l in g1])
     entry.append([point_labels.index(l) for l in g2])
     skeleton_idxs.append(entry)
-
-def draw_figure():
-    zavg-=zavg.min()
-    zavg/=zavg.max()
-    zavg *= 0.75
-    #zavg/=(1-0.35)
-    #zavg += 0.35
-    dot_size = 30
-    line_width = 3
-    cmap_name = 'cool_r'
-    xtest = ds_all_centered[itest]
-    fig = plt.figure()
-    ax = p3.Axes3D(fig)
-    ax.scatter(xtest[:,0],xtest[:,1],xtest[:,2],alpha=0.3,c=zavg,cmap=cmap_name,s=dot_size)
-    ax.set_xlim(-0.3,0.3)
-    ax.set_ylim(-0.3,0.3)
-    ax.set_zlim(-0.1,0.5)
-    cmap = matplotlib.cm.get_cmap(cmap_name)
-    for i,(g1,g2) in enumerate(connections):
-        g1_idx = [labels.index(l) for l in g1]
-        g2_idx = [labels.index(l) for l in g2]
-
-        color = 0.5*(zavg[g1_idx].mean() + zavg[g2_idx].mean())
-
-        x1 = np.mean(xtest[g1_idx],axis=0)
-        x2 = np.mean(xtest[g2_idx],axis=0)
-        ax.plot(np.linspace(x1[0],x2[0],10),np.linspace(x1[1],x2[1],10),np.linspace(x1[2],x2[2],10), color=cmap(color), lw=line_width)
 
 # calculate the coordinates for the lines
 def get_line_segments(seq, zcolor=None, cmap=None):
@@ -226,6 +164,7 @@ def get_line_segments(seq, zcolor=None, cmap=None):
     else:
         return xline
     
+# put line segments on the given axis, with given colors
 def put_lines(ax, segments, color=None, lw=2.5, alpha=None):
     lines = []
     for i in range(len(skeleton_idxs)):
@@ -242,6 +181,13 @@ def put_lines(ax, segments, color=None, lw=2.5, alpha=None):
         lines.append(l)
     return lines
 
+# animate a video of the stick figure.
+# `ghost` may be a second sequence, which will be superimposed
+# on the primary sequence.
+# If ghost_shift is given, the primary and ghost sequence will be separated laterally
+# by that amount.
+# `zcolor` may be an N-length array, where N is the number of vertices in seq, and will
+# be used to color the vertices. Typically this is set to the avg. z-value of each vtx.
 def animate_stick(seq, ghost=None, ghost_shift=0, figsize=None, zcolor=None, pointer=None, ax_lims=(-0.4,0.4), speed=45,
                   dot_size=20, dot_alpha=0.5, lw=2.5, cmap='cool_r', pointer_color='black'):
     if zcolor is None:
@@ -313,6 +259,7 @@ def animate_stick(seq, ghost=None, ghost_shift=0, figsize=None, zcolor=None, poi
         blit=False,
    ).to_html5_video()
     
+# draw a "comic strip" style rendering of the given sequence of poses
 def draw_comic(frames, angles=None, figsize=None, window_size=0.45, dot_size=20, lw=2.5, zcolor=None,cmap='cool_r'):
     fig = plt.figure(figsize=figsize)
     ax = p3.Axes3D(fig)
@@ -371,6 +318,7 @@ def draw_comic(frames, angles=None, figsize=None, window_size=0.45, dot_size=20,
                     color=color,
                     lw=lw)
 
+# Rotate a (?,...,?,3) tensor about the z-axis
 def rotate(X, theta):
     c,s = np.cos(theta), np.sin(theta)
     R = np.array([
