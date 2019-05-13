@@ -1,4 +1,4 @@
-# Dancing with Robots
+# Dancing with Data
 
 This repository contains source code for generating and visualizing 3D dance sequences with neural networks.
 
